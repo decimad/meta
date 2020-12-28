@@ -5,6 +5,8 @@
 
 namespace meta {
 
+    using std::size_t;
+
     template<typename Iterator>
     struct dereference;
 
@@ -14,8 +16,24 @@ namespace meta {
     template<typename Iterator>
     struct advance;
 
+    template<typename Iterator, size_t N>
+    struct advance_n;
+
     template<typename Iterator>
     using advance_t = typename advance<Iterator>::type;
+
+    template<typename Iterator, size_t N>
+    using advance_n_t = typename advance_n<Iterator, N>::type;
+
+    template<typename Iterator, size_t N>
+    struct advance_n {
+        using type = typename advance_n< advance_t<Iterator>, N-1 >::type;
+    };
+
+    template<typename Iterator>
+    struct advance_n<Iterator, 0> {
+        using type = Iterator;
+    };
 
     //
     // filter_iterator

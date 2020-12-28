@@ -3,17 +3,29 @@
 
 #include <meta/tlist.hpp>
 #include <meta/iterator.hpp>
+#include <system_error>
 #include <type_traits>
 
 namespace meta {
 
-    enum class traversal {
-        pre_lr,  // node, then children left-to-right
-        pre_rl,  // node, then children right-to-left
-        post_lr, // children left-to-right, then node
-        post_rl  // children right-to-left, then node
-    };
+    //
+    // Contexts
+    //
+    // Contexts are objects that encapsulate the child access of tree nodes
+    // Instead of requiring special members in each node of a tree, contexts allow to define the tree traversal on node elements
+    // "non-intrusively". They define the mapping of "Node -> # childrens" and conditionally "Node -> Child-of-Node[Index]"".
+    //
+    // This way, f.e. tlist_tree_ctx can define a tree-like data structure where inner nodes are simple meta::tlist's, ie. a nested
+    // type-list tree.
+    //
+    // The user may define custom tree contexts freely.
+    //
 
+    //
+    // tlist_tree_ctx
+    //
+    // Define a class of trees being represented as nested type lists, all non-type-list nodes are treated as leafs.
+    //
     struct tlist_tree_ctx {
 
         template<typename T>
@@ -38,6 +50,12 @@ namespace meta {
 
     };
 
+    //
+    // intrusive_tree_ctx
+    //
+    // Define a class of trees being implemented intrusively, ie. their node types define the value member num_children and,
+    // if num_children != 0, get_child to access the Nth child node.
+    //
     struct intrusive_tree_ctx {
 
         template<typename T>
@@ -54,152 +72,249 @@ namespace meta {
 
     };
 
-
+    // Alias template to get the number of children a node has
     template<typename Ctx, typename Node>
     static constexpr size_t node_num_children_v = Ctx::template num_children<Node>::value;;
 
+    // Alias template to get the Nth child node of a node
     template<typename Ctx, typename Node, size_t Index>
     using node_get_child_t = typename Ctx::template get_child<Node, Index>::type;
 
-
-    template<typename Ctx, typename Node, size_t Pos>
-    struct StackElement
-    {
-        using node = Node;
-        static constexpr size_t pos = Pos;
-
-        using dereference = node_get_child_t<Ctx, Node, pos>;
-    };
-
-    template<typename Node, size_t Pos>
-    struct StackElement2
-    {
-        using node = Node;
-        static constexpr size_t pos = Pos;
-    };
-
-    namespace detail {
-
-        struct begin_type {
-            static constexpr size_t num_children = 0;
-        };
-
-        struct end_type {
-            static constexpr size_t num_children = 0;
-        };
-
-    }
-
     namespace concepts {
-        template<typename Ctx, typename Node>
+        template<typename Node, typename Ctx>
         concept InnerNode = (node_num_children_v<Ctx, Node> != 0) && std::is_convertible_v<decltype(node_num_children_v<Ctx, node_get_child_t<Ctx, Node, 0>>), const size_t>;
 
-        template<typename Ctx, typename Node>
+        template<typename Node, typename Ctx>
         concept LeafNode = node_num_children_v<Ctx, Node> == 0;
 
-        template<typename Ctx, typename Node>
-        concept Sentinel = std::is_same_v<Node, meta::detail::end_type>;
+        template<typename Node, typename Ctx>
+        concept TreeNode = InnerNode<Node, Ctx> || LeafNode<Node, Ctx>;
     }
 
     namespace detail {
 
-        // Sample traversal stack:
+        // StackElement (abbreviated SE to keep the type names short)
+        template<typename Node, size_t Pos>
+        struct SE
+        {
+            using node = Node;
+            static constexpr size_t pos = Pos;
+        };
+
+        // All traversal algorithms work on a tree path represented as a TypeList representing a "stack", where the front element is
+        // the top of the stack.
+        // The top of the stack is a plain tree node represending the "Current" node.
+        // The elements below the CurrentNode consist of pair of "Node" and "Position", where Node[Position] results in the Node of the pair
+        // above or "CurrentNode", if that is the top of the stack.
+        //
+        // Example:
+        //
         // meta::tlist<
-        //    StackElement<Root,     0>,
-        //    StackElement<child_l1, 0>,
-        //    StackElement<child_l2, 0>,
-        //    child3
+        //    Current Node,
+        //    SE<Parent of "CurrentNode", Index of "Current Node">,
+        //    SE<Parent of "Parent of CurrentNode", Index of "Parent of CurrentNode">,
+        //    SE<Root, Index of "Parent of "Parent of CurrentNode"">
         // >
 
-        template<typename Ctx, meta::concepts::TypeList Stack, typename Top = meta::type_list::front<Stack>>
-        requires(concepts::InnerNode<Ctx, Top> || concepts::LeafNode<Ctx, Top>)
-        struct descend_left
+        template<concepts::TypeList Stack>
+        requires(type_list::size<Stack> > 1)
+        using parent_node_t = typename meta::type_list::get<Stack, 1>::node;
+
+        template<concepts::TypeList Stack>
+        requires(type_list::size<Stack> > 1)
+        static constexpr size_t top_node_pos_v = meta::type_list::get<Stack, 1>::pos;
+
+        template<typename Ctx, concepts::TypeList Stack>
+        requires(type_list::size<Stack> > 1)
+        static constexpr size_t parent_num_children_v = node_num_children_v<Ctx, parent_node_t<Stack>>;
+
+        //
+        // has_left_sibling(_v)
+        // check if the node addressed by the path stack has a right sibling
+        //
+        template<typename Ctx, concepts::TypeList Stack>
+        struct has_left_sibling
         {
-            using type = typename descend_left<Ctx, meta::type_list::push_front<meta::type_list::set<Stack, 0, StackElement2<Top, 0>>, node_get_child_t<Ctx, Top, 0>>>::type;
+            static constexpr bool value = false;
         };
 
-        template<typename Ctx, meta::concepts::TypeList Stack, typename Top>
-        requires(concepts::LeafNode<Ctx, Top>)
-        struct descend_left<Ctx, Stack, Top>
+        template<typename Ctx, concepts::TypeList Stack>
+        requires(type_list::size<Stack> > 1)
+        struct has_left_sibling<Ctx, Stack>
+        {
+            static constexpr bool value = top_node_pos_v<Stack> > 0;
+        };
+
+        template<typename Ctx, concepts::TypeList Stack>
+        static constexpr bool has_left_sibling_v = has_left_sibling<Ctx, Stack>::value;
+
+        //
+        // has_right_sibling(_v)
+        // check if the node addressed by the path stack has a right sibling
+        //
+        template<typename Ctx, concepts::TypeList Stack>
+        struct has_right_sibling
+        {
+            static constexpr bool value = false;
+        };
+
+        template<typename Ctx, concepts::TypeList Stack>
+        requires(type_list::size<Stack> > 1)
+        struct has_right_sibling<Ctx, Stack>
+        {
+            static constexpr bool value = (top_node_pos_v<Stack> + 1) < parent_num_children_v<Ctx, Stack>;
+        };
+
+        template<typename Ctx, concepts::TypeList Stack>
+        static constexpr bool has_right_sibling_v = has_right_sibling<Ctx, Stack>::value;
+
+        //
+        // ascend_one(_t)
+        //
+
+        template<concepts::TypeList Stack, typename ParentElement = type_list::get<Stack, 1>>
+        requires(type_list::size<Stack> > 1)
+        struct ascend_one
+        {
+            // Remove the node and the StackElement containing the parent
+            using type = type_list::set<type_list::pop_front<Stack>, 0, parent_node_t<Stack>>;
+        };
+
+        template<concepts::TypeList Stack>
+        using ascend_one_t = typename ascend_one<Stack>::type;
+
+        //
+        // descend_one(_t)
+        //
+
+        template<typename Ctx, concepts::TypeList Stack, size_t Pos, concepts::InnerNode<Ctx> Top = type_list::front<Stack>>
+        requires(Pos < node_num_children_v<Ctx, Top>)
+        struct descend_one
+        {
+            using type = type_list::push_front<type_list::set<Stack, 0, SE<Top, Pos>>, node_get_child_t<Ctx, Top, Pos>>;
+        };
+
+        template<typename Ctx, concepts::TypeList Stack, size_t Pos>
+        using descend_one_t = typename descend_one<Ctx, Stack, Pos>::type;
+
+        //
+        // descend_deep_left: beginning at some node N, take the left-most child until reaching a leaf.
+        //
+        template<typename Ctx, meta::concepts::TypeList Stack, concepts::TreeNode<Ctx> Top = meta::type_list::front<Stack>>
+        struct descend_deep_left
+        {
+            using type = typename descend_deep_left<Ctx, descend_one_t<Ctx, Stack, 0>>::type;
+        };
+
+        template<typename Ctx, meta::concepts::TypeList Stack, concepts::LeafNode<Ctx> Top>
+        struct descend_deep_left<Ctx, Stack, Top>
         {
             using type = Stack;
-        };
-
-        template<typename Ctx, typename Node>
-        requires(concepts::InnerNode<Ctx, Node> || concepts::LeafNode<Ctx, Node>)
-        using descend_left_t = typename descend_left<Ctx, meta::tlist<Node>>::type;
-
-
-        template<typename Ctx, meta::concepts::TypeList Stack, typename Top = meta::type_list::front<Stack>>
-        requires(concepts::InnerNode<Ctx, Top> || concepts::LeafNode<Ctx, Top>)
-        struct descend_right
-        {
-            using type = typename descend_right<Ctx, meta::type_list::push_front<meta::type_list::set<Stack, 0, StackElement2<Top, node_num_children_v<Ctx, Top>-1>>, node_get_child_t<Ctx, Top, node_num_children_v<Ctx, Top>-1>>>::type;
-        };
-
-        template<typename Ctx, meta::concepts::TypeList Stack, typename Top>
-        requires(concepts::LeafNode<Ctx, Top>)
-        struct descend_right<Ctx, Stack, Top>
-        {
-            using type = Stack;
-        };
-
-        template<typename Ctx, typename Node>
-        requires(concepts::InnerNode<Ctx, Node> || concepts::LeafNode<Ctx, Node>)
-        using descend_right_t = typename descend_right<Ctx, meta::tlist<Node>>::type;
-
-
-        template<typename Ctx, meta::concepts::TypeList Stack, bool Empty = meta::type_list::is_empty<Stack>>
-        struct walk_stack_right_helper
-        {
-            using front = meta::type_list::front<Stack>;    // StackElement!
-
-            using type = std::conditional_t<(node_num_children_v<Ctx, typename front::node> > (front::pos + 1)),
-                // Replace top
-                meta::type_list::push_front<meta::type_list::pop_front<Stack>, StackElement<Ctx, typename front::node, front::pos+1>>,
-                // Pop top, continue
-                typename walk_stack_right_helper<Ctx, meta::type_list::pop_front<Stack>>::type
-            >;
         };
 
         template<typename Ctx, meta::concepts::TypeList Stack>
-        struct walk_stack_right_helper<Ctx, Stack, true> {
+        using descend_deep_left_t = typename descend_deep_left<Ctx, Stack, meta::type_list::front<Stack>>::type;
+
+        //
+        // descend_deep_right: beginning at some node N, take the right-most child until reaching a leaf.
+        //
+        template<typename Ctx, meta::concepts::TypeList Stack, concepts::TreeNode<Ctx> Top = type_list::front<Stack>>
+        struct descend_deep_right
+        {
+            using type = typename descend_deep_right<Ctx, descend_one_t<Ctx, Stack, node_num_children_v<Ctx, Top> - 1>>::type;
+        };
+
+        template<typename Ctx, meta::concepts::TypeList Stack, concepts::LeafNode<Ctx> Top>
+        requires(concepts::LeafNode<Ctx, Top>)
+        struct descend_deep_right<Ctx, Stack, Top>
+        {
             using type = Stack;
         };
 
-        template<typename Ctx, meta::concepts::TypeList Stack, meta::concepts::TypeList NewStack = typename walk_stack_right_helper<Ctx, Stack>::type, bool NewStackEmpty = meta::type_list::is_empty<NewStack>>
-        struct walk_stack_right {
-            using stack = NewStack;
-            using node  = typename meta::type_list::front<NewStack>::dereference;
+        template<typename Ctx, concepts::TreeNode<Ctx> Node>
+        using descend_deep_right_t = typename descend_deep_right<Ctx, meta::tlist<Node>>::type;
+
+        //
+        // ascend node stack upwards until we find a right sibling and then switch to that right sibling
+        //
+
+        // PS: Inner node, no right sibling
+        template<typename Ctx, concepts::TypeList Stack, size_t Size = type_list::size<Stack>>
+        struct ascend_next_right_sibling
+        {
+            using type = typename ascend_next_right_sibling<Ctx, ascend_one_t<Stack>>::type;
         };
 
-        template<typename Ctx, meta::concepts::TypeList Stack, meta::concepts::TypeList NewStack>
-        struct walk_stack_right<Ctx, Stack, NewStack, true>
+        // PS: Inner node, right sibling
+        template<typename Ctx, concepts::TypeList Stack, size_t Size>   // Inner node, right sibling
+        requires(has_right_sibling_v<Ctx, Stack>)
+        struct ascend_next_right_sibling<Ctx, Stack, Size>
         {
-            using stack = tlist<>;
-            using node  = end_type;
+            using type = descend_one_t<Ctx, ascend_one_t<Stack>, top_node_pos_v<Stack> + 1>;
         };
+
+        // PS: root
+        template<typename Ctx, concepts::TypeList Stack>
+        struct ascend_next_right_sibling<Ctx, Stack, 1>                 // Root node has no right sibling
+        {
+            using type = meta::tlist<>;
+        };
+
+        template<typename Ctx, concepts::TypeList Stack>
+        using ascend_next_right_sibling_t = typename ascend_next_right_sibling<Ctx, Stack>::type;
+
+        // ==========
+        // traversals
+        // ==========
+
+
+        struct traversal_pre_lr
+        {
+            template<typename Ctx, concepts::TreeNode<Ctx> Root>
+            struct begin {
+                using type = meta::tlist<Root>;
+            };
+
+            template<typename Ctx, concepts::TreeNode<Ctx> Root>
+            struct end {
+                using type = meta::tlist<>;
+            };
+
+            // Inner node on top of stack
+            template<typename Ctx, concepts::TypeList Stack, concepts::TreeNode<Ctx> Top = type_list::front<Stack>>
+            struct advance {
+                using type = descend_one_t<Ctx, Stack, 0>;
+            };
+
+            // Leaf node on top of stack -> find next (ancestor) sibling, then descend-left
+            template<typename Ctx, concepts::TypeList Stack, concepts::LeafNode<Ctx> Top>
+            struct advance<Ctx, Stack, Top>
+            {
+                using type = ascend_next_right_sibling_t<Ctx, Stack>;
+            };
+        };
+
     }
 
-
-
-    template<typename Tree, typename Node, typename Ctx = intrusive_tree_ctx, meta::concepts::TypeList PathStack = meta::tlist<>>
-    requires( concepts::InnerNode<Ctx, Node> || concepts::LeafNode<Ctx, Node> || concepts::Sentinel<Ctx, Node> )
+    template<typename Ctx, concepts::TypeList Stack, typename Traversal>
+    requires(concepts::TreeNode<type_list::front<Stack>, Ctx> || type_list::is_empty<Stack>)
     struct tree_iterator
     {
     };
 
-    template<typename Tree, typename Ctx = intrusive_tree_ctx>
-    using tree_begin = tree_iterator<Tree, Tree, Ctx>;
+    template<typename Root, typename Ctx = intrusive_tree_ctx, typename Traversal = detail::traversal_pre_lr>
+    requires(concepts::TreeNode<Root, Ctx>)
+    using tree_begin = tree_iterator<Ctx, typename Traversal::template begin<Ctx, Root>::type, Traversal>;
 
-    template<typename Tree, typename Ctx = intrusive_tree_ctx>
-    using tree_end   = tree_iterator<Tree, detail::end_type, Ctx, meta::tlist<>>;
+    template<typename Root, typename Ctx = intrusive_tree_ctx, typename Traversal = detail::traversal_pre_lr>
+    requires(concepts::TreeNode<Root, Ctx>)
+    using tree_end   = tree_iterator<Ctx, typename Traversal::template end<Ctx, Root>::type, Traversal>;
 
     template<typename Interator>
     struct tree_context;
 
-    template<typename Tree, typename Node, typename Ctx, typename Stack>
-    struct tree_context<tree_iterator<Tree, Node, Ctx, Stack>>
+    template<typename Ctx, concepts::TypeList Stack, typename Traversal>
+    struct tree_context<tree_iterator<Ctx, Stack, Traversal>>
     {
         using type = Ctx;
     };
@@ -207,75 +322,34 @@ namespace meta {
     template<typename Iterator>
     using tree_context_t = typename tree_context<Iterator>::type;
 
+    //
     // dereference(it)
     //
 
-    template<typename Tree, typename Node, typename Ctx, typename Stack>
-    struct dereference<tree_iterator<Tree, Node, Ctx, Stack>>
+    template<typename Ctx, concepts::TypeList Stack, typename Traversal>
+    struct dereference<tree_iterator<Ctx, Stack, Traversal>>
     {
-        using type = Node;
+        using type = type_list::front<Stack>;
     };
 
-    namespace detail {
-
-        template<typename Tree, typename Node, typename Ctx, typename Stack, size_t NumChildern>
-        struct advance_tree {
-            using type = tree_iterator<Tree, node_get_child_t<Ctx, Node, 0>, Ctx>;
-        };
-
-        template<typename Tree, typename Node, typename Ctx, typename Stack>
-        struct advance_tree<Tree, Node, Ctx, Stack, 0>
-        {
-            using type = tree_iterator<Tree, typename detail::walk_stack_right<Ctx, Stack>::node, Ctx, typename detail::walk_stack_right<Ctx, Stack>::stack >;
-        };
-
-    }
-
+    //
     // advance(it)
     //
-    template<typename Tree, typename Node, typename Ctx, typename Stack>
-    struct advance<tree_iterator<Tree, Node, Ctx, Stack>>
+
+    template<typename Ctx, concepts::TypeList Stack, typename Traversal>
+    struct advance<tree_iterator<Ctx, Stack, Traversal>>
     {
-        using type = typename detail::advance_tree<Tree, Node, Ctx, Stack, node_num_children_v<Ctx, Node>>::type;
+        using type = tree_iterator<Ctx, typename Traversal::template advance<Ctx, Stack>::type, Traversal>;
     };
-
-    //
-    //  tree(it)
-    //
-    template<typename TreeIterator>
-    struct tree;
-
-    template<typename Tree, typename Node, typename Ctx, typename Stack>
-    struct tree<tree_iterator<Tree, Node, Ctx, Stack>>
-    {
-        using type = Tree;
-    };
-
-    template<typename TreeIterator>
-    using tree_t = typename tree<TreeIterator>::type;
-
-    //
-    // node(it)
-    //
-    template<typename TreeIterator>
-    struct node;
-
-    template<typename Tree, typename Node, typename Ctx, typename Stack>
-    struct node<tree_iterator<Tree, Node, Ctx, Stack>>
-    {
-        using type = Node;
-    };
-
-    template<typename TreeIterator>
-    using node_t = typename node<TreeIterator>::type;
 
     //
     // Tree range
     //
-    template<typename Tree, typename Ctx = intrusive_tree_ctx>
+
+    template<typename Root, typename Ctx = intrusive_tree_ctx, typename Traversal = detail::traversal_pre_lr>
     using tree_range_t = iterator_range<
-        tree_begin<Tree, Ctx>,
-        tree_end<Tree, Ctx>
+        tree_begin<Root, Ctx, Traversal>,
+        tree_end  <Root, Ctx, Traversal>
     >;
 
 }

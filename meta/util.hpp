@@ -18,7 +18,7 @@ namespace meta {
     template<typename T0, typename T1, typename... Ts>
     struct are_same<T0, T1, Ts...>
     {
-        static constexpr bool value = std::is_same_v<T0, T1> && are_same<T1, Ts...>::value;
+        static constexpr bool value = std::is_same_v<T0, T1> && (std::is_same_v<T0, Ts> && ...);
     };
 
     template<typename... Ts>
