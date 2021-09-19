@@ -15,12 +15,6 @@ namespace meta
 {
     using std::size_t;
 
-    template<concepts::TypeList List, size_t Pos>
-    struct tlist_iterator {};
-
-    template<concepts::TypeList List, size_t Pos>
-    struct tlist_reverse_iterator {};
-
     namespace type_list
     {
 
@@ -120,7 +114,30 @@ namespace meta
 
         template<concepts::TypeList List, template<typename> typename Predicate>
         using copy_if = common::copy_if_tlist_t<List, Predicate>;
+    }
 
+    template<concepts::TypeList List, size_t Pos>
+    struct tlist_iterator {
+        using dereference = type_list::get<List, Pos>;
+        using advance     = tlist_iterator<List, Pos+1>;
+    };
+
+    template<concepts::TypeList List, size_t Pos>
+    requires(Pos == type_list::size<List>)
+    struct tlist_iterator<List, Pos> {
+    };
+
+    template<concepts::TypeList List, size_t Pos>
+    struct tlist_reverse_iterator {
+        using dereference = type_list::get<List, Pos-1>;
+        using advance     = tlist_reverse_iterator<List, Pos-1>;
+    };
+
+    template<concepts::TypeList List>
+    struct tlist_reverse_iterator<List, 0> {
+    };
+
+    namespace type_list {
         template<concepts::TypeList List>
         using begin = tlist_iterator<List, 0>;
 
@@ -142,18 +159,6 @@ namespace meta
 
     template<concepts::TypeList List>
     auto is_sentinel(tlist_iterator<List, type_list::size<List>>) -> std::true_type;
-
-    template<concepts::TypeList List, size_t Pos>
-    auto advance(tlist_iterator<List, Pos>) -> tlist_iterator<List, Pos+1>;
-
-    template<concepts::TypeList List, size_t Pos>
-    auto dereference(tlist_iterator<List, Pos>) -> type_list::get<List, Pos>;
-
-    template<concepts::TypeList List, size_t Pos>
-    auto advance(tlist_reverse_iterator<List, Pos>) -> tlist_reverse_iterator<List, Pos-1>;
-
-    template<concepts::TypeList List, size_t Pos>
-    auto dereference(tlist_reverse_iterator<List, Pos>) -> type_list::get<List, Pos-1>;
 
     namespace detail {
 

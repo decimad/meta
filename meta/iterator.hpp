@@ -18,10 +18,10 @@ namespace meta {
 
     namespace concepts {
 
-        template<typename Iter>
-        concept ValidIterator = requires(Iter) {
-            dereference(std::declval<Iter>());
-            advance(std::declval<Iter>());
+        template<typename T>
+        concept ValidIterator = requires() {
+            typename T::dereference;
+            typename T::advance;
         };
 
         template<typename Iter>
@@ -40,10 +40,10 @@ namespace meta {
     //
 
     template<concepts::ValidIterator Iter>
-    using advance_t = decltype(advance(std::declval<Iter>()));;
+    using advance_t = typename Iter::advance; // decltype(advance(std::declval<Iter>()));;
 
     template<concepts::ValidIterator Iter>
-    using dereference_t = decltype(dereference(std::declval<Iter>()));
+    using dereference_t = typename Iter::dereference; // decltype(dereference(std::declval<Iter>()));
 
     template<concepts::Iterator Iter, size_t N>
        struct advance_n
@@ -130,6 +130,8 @@ namespace meta {
     template<typename Iterator, typename End, template<typename> typename Filter>
     struct filter_iterator_struct
     {
+        using dereference = dereference_t<typename detail::advance_until<Iterator, End, Filter>::type>;
+        using advance     = filter_iterator_struct<advance_t<typename detail::advance_until<Iterator, End, Filter>::type>, End, Filter>;
     };
 
     template<typename Iterator, typename End, template <typename> typename Filter>

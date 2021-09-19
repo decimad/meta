@@ -371,42 +371,38 @@ namespace meta {
 
     }
 
+    template<typename Ctx, detail::PathStack<Ctx> Stack, typename Traversal>
+    struct tree_iterator;
+
+    namespace detail {
+        template<typename Ctx, typename OriginalStack, typename NewStackResult, typename Traversal>
+        struct tree_advance_switch
+        {
+            using type = tree_iterator<Ctx, NewStackResult, Traversal>;
+        };
+
+        template<typename Ctx, typename OriginalStack, typename Traversal>
+        struct tree_advance_switch<Ctx, OriginalStack, sentinel<>, Traversal>
+        {
+            using type = sentinel<tree_iterator<Ctx, OriginalStack, Traversal>>;
+        };
+    }
+
     //
     // tree_iterator
     //
     template<typename Ctx, detail::PathStack<Ctx> Stack, typename Traversal>
     struct tree_iterator
     {
+        using dereference = type_list::front<Stack>;
+        using advance     = typename detail::tree_advance_switch<Ctx, Stack, typename Traversal::template advance<Ctx, Stack>::type, Traversal>::type;
     };
-
 
     template<typename T>
     concept HasType = requires()
     {
         typename T::type;
     };
-
-    template<typename Ctx, typename OriginalStack, typename NewStackResult, typename Traversal>
-    struct tree_advance_switch
-    {
-        using type = tree_iterator<Ctx, NewStackResult, Traversal>;
-    };
-
-    template<typename Ctx, typename OriginalStack, typename Traversal>
-    struct tree_advance_switch<Ctx, OriginalStack, sentinel<>, Traversal>
-    {
-        using type = sentinel<tree_iterator<Ctx, OriginalStack, Traversal>>;
-    };
-
-    template<typename Ctx, detail::PathStack<Ctx> Stack, typename Traversal>
-    auto dereference(tree_iterator<Ctx, Stack, Traversal>) -> type_list::front<Stack>;
-
-    template<typename Ctx, detail::PathStack<Ctx> Stack, typename Traversal>
-    auto advance(tree_iterator<Ctx, Stack, Traversal>) ->  typename tree_advance_switch<Ctx, Stack, typename Traversal::template advance<Ctx, Stack>::type, Traversal>::type;
-
-    // This will obviously break, as all compatible tree iterators would compare equal
-    //template<typename Ctx, concepts::TypeList Stack, typename Traversal>
-    //std::true_type iterator_equal(tree_iterator<Ctx, Stack, Traversal>, tree_iterator<Ctx, tlist<sentinel>, Traversal>);
 
     //
     // tree_begin

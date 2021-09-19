@@ -5,47 +5,45 @@
 
 namespace meta {
 
-    template<typename T>
-    using begin_t = decltype(begin(std::declval<T>()));
-
-    template<typename T>
-    using end_t = decltype(end(std::declval<T>()));
+    //
+    //  iterator_range (also works as iterator)
+    //
 
     namespace concepts {
 
         template<typename T>
         concept Range = requires (T) {
-            typename begin_t<T>;
-            typename end_t<T>;
+            typename T::begin;
+            typename T::end;
         };
 
         template<typename T>
-        concept EmptyRange = Range<T> && iterator_equal_v<begin_t<T>, end_t<T>>;
+        concept EmptyRange = Range<T> && iterator_equal_v<typename T::begin, typename T::end>;
 
     }
-
-    //
-    //  iterator_range (also works as iterator)
-    //
 
     template<concepts::Iterator Begin, concepts::Iterator End>
     struct iterator_range
     {
-//        using begin = Begin;
-//        using end   = End;
+        using dereference = dereference_t<Begin>;
+        using advance     = iterator_range<advance_t<Begin>, End>;
+
+        using begin = Begin;
+        using end   = End;
     };
 
-    template<typename Begin, typename End>
-    auto begin(iterator_range<Begin, End>) -> Begin;
+    template<concepts::Iterator Iter>
+    struct iterator_range<Iter, Iter>
+    {
+        using begin = Iter;
+        using end   = Iter;;
+    };
 
-    template<typename Begin, typename End>
-    auto end(iterator_range<Begin, End>) -> End;
+    template<concepts::Range T>
+    using begin_t = typename T::begin;
 
-    template<typename Begin, typename End>
-    auto dereference(iterator_range<Begin, End>) -> dereference_t<Begin>;
-
-    template<typename Begin, typename End>
-    auto advance(iterator_range<Begin, End>) -> iterator_range<advance_t<Begin>, End>;
+    template<concepts::Range T>
+    using end_t   = typename T::end;
 
     template<typename Begin, typename End>
     auto is_sentinel(iterator_range<Begin, End>) -> decltype(is_sentinel(std::declval<Begin>()));
@@ -70,7 +68,7 @@ namespace meta {
     };
 
     template<concepts::Range T, template<typename> typename Transformer>
-    auto dereference(transformed_range<T, Transformer>) -> typename Transformer< dereference_t<begin_t<T>> >::type;
+    auto dereference(transformed_range<T, Transformer>) -> typename Transformer<dereference_t<begin_t<T>> >::type;
 
     //
     // Filtered range
