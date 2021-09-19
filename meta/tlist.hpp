@@ -6,13 +6,20 @@
 #ifndef META_TLIST_HPP___
 #define META_TLIST_HPP___
 
-#include "common.hpp"
 #include <cstddef>
 #include <type_traits>
+#include <meta/common.hpp>
+#include <meta/iterator.hpp>
 
 namespace meta
 {
     using std::size_t;
+
+    template<concepts::TypeList List, size_t Pos>
+    struct tlist_iterator {};
+
+    template<concepts::TypeList List, size_t Pos>
+    struct tlist_reverse_iterator {};
 
     namespace type_list
     {
@@ -114,14 +121,39 @@ namespace meta
         template<concepts::TypeList List, template<typename> typename Predicate>
         using copy_if = common::copy_if_tlist_t<List, Predicate>;
 
-        template<concepts::TypeList List, size_t Pos>
-        struct iterator
-        {
-            using advance = iterator<List, Pos+1>;
-            using dereference = get<List, Pos>;
-        };
+        template<concepts::TypeList List>
+        using begin = tlist_iterator<List, 0>;
 
+        template<concepts::TypeList List>
+        using end   = tlist_iterator<List, size<List>>;
+
+        template<concepts::TypeList List>
+        using rbegin = tlist_reverse_iterator<List, size<List>>;
+
+        template<concepts::TypeList List>
+        using rend = tlist_reverse_iterator<List, 0>;
     }
+
+    template<concepts::TypeList List>
+    auto begin(List) -> tlist_iterator<List, 0>;
+
+    template<concepts::TypeList List>
+    auto end(List) -> tlist_iterator<List, type_list::size<List>>;
+
+    template<concepts::TypeList List>
+    auto is_sentinel(tlist_iterator<List, type_list::size<List>>) -> std::true_type;
+
+    template<concepts::TypeList List, size_t Pos>
+    auto advance(tlist_iterator<List, Pos>) -> tlist_iterator<List, Pos+1>;
+
+    template<concepts::TypeList List, size_t Pos>
+    auto dereference(tlist_iterator<List, Pos>) -> type_list::get<List, Pos>;
+
+    template<concepts::TypeList List, size_t Pos>
+    auto advance(tlist_reverse_iterator<List, Pos>) -> tlist_reverse_iterator<List, Pos-1>;
+
+    template<concepts::TypeList List, size_t Pos>
+    auto dereference(tlist_reverse_iterator<List, Pos>) -> type_list::get<List, Pos-1>;
 
     namespace detail {
 
@@ -147,8 +179,8 @@ namespace meta
 
         static constexpr bool is_empty = (size == 0);
 
-        using begin = type_list::iterator<tlist, 0>;
-        using end   = type_list::iterator<tlist, size>;
+        using begin = tlist_iterator<tlist, 0>;
+        using end   = tlist_iterator<tlist, size>;
 
         using cleared = type_list::clear<tlist>;
 

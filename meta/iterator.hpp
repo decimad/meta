@@ -7,33 +7,89 @@ namespace meta {
 
     using std::size_t;
 
-    template<typename Iterator>
-    struct dereference;
+    template<typename T = void>
+    struct sentinel {};
 
-    template<typename Iterator>
-    using dereference_t = typename dereference<Iterator>::type;
+    template<typename T>
+    std::false_type is_sentinel(T);
 
-    template<typename Iterator>
-    struct advance;
+    template<typename T>
+    std::true_type is_sentinel(sentinel<T>);
 
-    template<typename Iterator, size_t N>
-    struct advance_n;
+    namespace concepts {
 
-    template<typename Iterator>
-    using advance_t = typename advance<Iterator>::type;
+        template<typename Iter>
+        concept ValidIterator = requires(Iter) {
+            dereference(std::declval<Iter>());
+            advance(std::declval<Iter>());
+        };
 
-    template<typename Iterator, size_t N>
-    using advance_n_t = typename advance_n<Iterator, N>::type;
+        template<typename Iter>
+        concept Sentinel = decltype(is_sentinel(std::declval<Iter>()))::value;
 
-    template<typename Iterator, size_t N>
-    struct advance_n {
-        using type = typename advance_n< advance_t<Iterator>, N-1 >::type;
+        template<typename T>
+        concept Iterator   = Sentinel<T> || ValidIterator<T>; // last element is range
+
+        template<typename T>
+        concept Enumerator = ValidIterator<T> || Sentinel<T>;   // This is basically the same since we already need to know Sentinel<> for the iterator
+
+    }
+
+    //
+    // advance_n
+    //
+
+    template<concepts::ValidIterator Iter>
+    using advance_t = decltype(advance(std::declval<Iter>()));;
+
+    template<concepts::ValidIterator Iter>
+    using dereference_t = decltype(dereference(std::declval<Iter>()));
+
+    template<concepts::Iterator Iter, size_t N>
+       struct advance_n
+    {
+        using type = typename advance_n<advance_t<Iter>, N-1>::type;
     };
 
-    template<typename Iterator>
-    struct advance_n<Iterator, 0> {
-        using type = Iterator;
+    template<concepts::Iterator Iter>
+    struct advance_n<Iter, 0>
+    {
+        using type = Iter;
     };
+
+    template<concepts::Iterator Iter, size_t N>
+    using advance_n_t = typename advance_n<Iter, N>::type;
+
+
+    //
+    // transform_iterator
+    //
+
+    template<concepts::Iterator Iter, template<typename> typename Transform>
+    struct transform_iterator
+    {};
+
+    template<concepts::Iterator Iter, template<typename> typename Transform>
+    auto dereference(transform_iterator<Iter, Transform>) -> typename Transform<dereference_t<Iter>>::type;
+
+    template<concepts::Iterator Iter, template<typename> typename Transform>
+    auto advance(transform_iterator<Iter, Transform>) -> typename Transform<advance_t<Iter>>::type;
+
+    //
+    // iterator_equal
+    // details: It may not always be desirable to compute the true type of the sentinel iterator 'end' when iterating sequences
+    //          with a bidirectional iterator. Thus we add a comparison overload to compare two iterators for equality, even if their
+    //          types are not equal.
+    //
+
+    template<concepts::Iterator Iter1, concepts::Iterator Iter2>
+    std::false_type iterator_equal(Iter1, Iter2);
+
+    template<concepts::Iterator Iter>
+    std::true_type iterator_equal(Iter, Iter);
+
+    template<concepts::Iterator Iter1, concepts::Iterator Iter2>
+    static constexpr bool iterator_equal_v = decltype(iterator_equal(std::declval<Iter1>(), std::declval<Iter2>()))::value;
 
     //
     // filter_iterator
@@ -80,51 +136,10 @@ namespace meta {
     using filter_iterator = filter_iterator_struct<typename detail::advance_until<Iterator, End, Filter>::type, End, Filter>;
 
     template<typename Iterator, typename End, template<typename> typename Filter>
-    struct dereference<filter_iterator_struct<Iterator, End, Filter>>
-    {
-        using type = dereference_t<Iterator>;
-    };
+    auto dereference(filter_iterator_struct<Iterator, End, Filter>) -> dereference_t<Iterator>;
 
     template<typename Iterator, typename End, template<typename> typename Filter>
-    struct advance<filter_iterator_struct<Iterator, End, Filter>>
-    {
-        using type = filter_iterator_struct<advance_t<Iterator>, End, Filter>;
-    };
-
-
-    template<typename Begin, typename End>
-    struct iterator_range
-    {
-        using begin = Begin;
-        using end   = End;
-    };
-
-    template<typename T>
-    struct range_begin;
-
-    template<typename T>
-    struct range_begin;
-
-    template<typename IteratorRange, template<typename> typename Filter>
-    using filter_range_t = iterator_range<
-        filter_iterator<typename IteratorRange::begin, typename IteratorRange::end, Filter>,
-        filter_iterator<typename IteratorRange::end,   typename IteratorRange::end, Filter>
-    >;
-
-    template<typename Begin, typename End>
-    struct advance<iterator_range<Begin, End>>
-    {
-        using type = iterator_range<advance_t<Begin>, End>;
-    };
-
-    template<typename Begin, typename End>
-    struct dereference<iterator_range<Begin, End>>
-    {
-        using type = dereference_t<Begin>;
-    };
-
-    template<typename Range>
-    concept EmptyRange = std::is_same_v<typename Range::begin, typename Range::end>;
+    auto advance(filter_iterator_struct<Iterator, End, Filter>) -> filter_iterator<advance_t<Iterator>, End, Filter>;
 
 }
 

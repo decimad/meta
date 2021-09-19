@@ -3,7 +3,7 @@ project(meta CXX)
 
 if(${CMAKE_CURRENT_SOURCE_DIR} STREQUAL ${CMAKE_SOURCE_DIR})
     message("meta: standalone build")
-    add_executable(verification verification.cpp)
+    add_executable(verification verification.cpp iterator_experiments.cpp)
     target_include_directories(verification PRIVATE .)
     target_compile_options(verification
         PRIVATE
